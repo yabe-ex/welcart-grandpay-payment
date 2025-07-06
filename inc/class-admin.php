@@ -6,22 +6,8 @@ class WelcartGrandpayPaymentAdmin {
         // 強制ログ（WP_DEBUG関係なく出力）
         error_log('GrandPay Admin: Constructor called - FORCED LOG');
 
-        // 即座にフィルターフックを登録
-        add_filter('usces_filter_settlement_tab_title', array($this, 'add_settlement_tab'), 10, 1);
-        add_filter('usces_filter_settlement_tab_body', array($this, 'add_settlement_tab_body'), 10, 1);
-        error_log('GrandPay Admin: Main filters registered immediately');
-
-        // その他のフィルターフックも登録
-        add_filter('usces_settlement_tab_title', array($this, 'add_settlement_tab'));
-        add_filter('usces_filter_settlement_tabs', array($this, 'add_settlement_tab'));
-        add_filter('usces_settlement_tabs', array($this, 'add_settlement_tab'));
-        add_filter('usces_settlement_tab_body', array($this, 'add_settlement_tab_body'));
-
-        add_action('usces_action_admin_settlement_update', array($this, 'save_settlement_settings'));
-        add_action('usces_admin_settlement_update', array($this, 'save_settlement_settings'));
-
-        // **フィルターフックの強制テスト**
-        add_action('admin_init', array($this, 'test_filter_hooks'));
+        // Welcart が読み込まれた後にフィルターを登録
+        add_action('init', array($this, 'register_settlement_filters'), 15);
 
         // プラグイン独自の設定ページ（デバッグ用）
         add_action('admin_menu', array($this, 'create_menu'));
@@ -32,12 +18,42 @@ class WelcartGrandpayPaymentAdmin {
         // インストール案内の表示
         add_action('admin_notices', array($this, 'show_installation_guide'));
 
+        // **フィルターフックの強制テスト**
+        add_action('admin_init', array($this, 'test_filter_hooks'));
+
         // デバッグ：すべてのフィルターフックをログ出力
         if (defined('WP_DEBUG') && WP_DEBUG) {
             add_action('init', array($this, 'debug_all_hooks'), 99);
         }
 
         error_log('GrandPay Admin: Constructor completed - FORCED LOG');
+    }
+
+    /**
+     * Welcart の決済関連フィルターを登録
+     */
+    public function register_settlement_filters() {
+        // Welcart が利用可能かチェック
+        if (!function_exists('usces_get_system_option')) {
+            error_log('GrandPay Admin: Welcart not available, skipping filter registration');
+            return;
+        }
+
+        error_log('GrandPay Admin: Registering settlement filters');
+
+        // 複数のフィルター名でタブ追加を試行（Welcart バージョンによる違いに対応）
+        add_filter('usces_filter_settlement_tab_title', array($this, 'add_settlement_tab'), 10, 1);
+        add_filter('usces_filter_settlement_tab_body', array($this, 'add_settlement_tab_body'), 10, 1);
+        add_filter('usces_settlement_tab_title', array($this, 'add_settlement_tab'), 10, 1);
+        add_filter('usces_settlement_tab_body', array($this, 'add_settlement_tab_body'), 10, 1);
+        add_filter('usces_filter_settlement_tabs', array($this, 'add_settlement_tab'), 10, 1);
+        add_filter('usces_settlement_tabs', array($this, 'add_settlement_tab'), 10, 1);
+
+        // 設定保存処理
+        add_action('usces_action_admin_settlement_update', array($this, 'save_settlement_settings'));
+        add_action('usces_admin_settlement_update', array($this, 'save_settlement_settings'));
+
+        error_log('GrandPay Admin: Settlement filters registered');
     }
 
     /**
@@ -78,6 +94,7 @@ class WelcartGrandpayPaymentAdmin {
             error_log('GrandPay Admin: usces_filter_settlement_tab_title filter does NOT exist');
         }
     }
+
     public function debug_all_hooks() {
         global $wp_filter;
 
@@ -98,6 +115,7 @@ class WelcartGrandpayPaymentAdmin {
             error_log('GrandPay Debug: On Welcart settlement page: ' . $_GET['page']);
         }
     }
+
     public function show_installation_guide() {
         // クレジット決済設定ページでのみ表示
         $screen = get_current_screen();
@@ -147,14 +165,14 @@ class WelcartGrandpayPaymentAdmin {
         $filter_name = 'unknown';
         foreach ($backtrace as $trace) {
             if (isset($trace['function']) && $trace['function'] === 'apply_filters') {
-                $filter_name = $trace['args'][0] ?? 'unknown';
+                $filter_name = isset($trace['args'][0]) ? $trace['args'][0] : 'unknown';
                 break;
             }
         }
 
-        // デバッグログ
+        // デバッグログ - 配列を文字列変換の警告を修正
         if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log("GrandPay: add_settlement_tab called via filter: " . $filter_name);
+            error_log("GrandPay: add_settlement_tab called via filter: " . (is_array($filter_name) ? 'Array' : $filter_name));
             error_log('GrandPay: existing tabs - ' . print_r($tabs, true));
         }
 
