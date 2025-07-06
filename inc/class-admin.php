@@ -9,6 +9,8 @@ class WelcartGrandpayPaymentAdmin {
         // Welcart が読み込まれた後にフィルターを登録
         add_action('init', array($this, 'register_settlement_filters'), 15);
 
+        add_action('admin_enqueue_scripts', array($this, 'admin_enqueue'));
+
         // プラグイン独自の設定ページ（デバッグ用）
         add_action('admin_menu', array($this, 'create_menu'));
         error_log('GrandPay Admin: admin_menu hook added - FORCED LOG');
@@ -355,7 +357,8 @@ class WelcartGrandpayPaymentAdmin {
     }
 
     function admin_enqueue($hook) {
-        if (strpos($hook, WELCART_GRANDPAY_PAYMENT_SLUG) === false) {
+        // Welcartの決済設定ページでのみ読み込み
+        if (strpos($hook, 'usces_settlement') === false) {
             return;
         }
 
@@ -367,11 +370,34 @@ class WelcartGrandpayPaymentAdmin {
         wp_enqueue_style(WELCART_GRANDPAY_PAYMENT_SLUG . '-admin');
         wp_enqueue_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-admin');
 
-        $admin = array(
+        // GrandPay選択状態をJavaScriptに渡す
+        $selected_settlements = get_option('usces_settlement_selected', array());
+        $is_grandpay_selected = false;
+
+        if (is_array($selected_settlements)) {
+            $is_grandpay_selected = in_array('grandpay', $selected_settlements);
+        } elseif (is_string($selected_settlements)) {
+            $is_grandpay_selected = strpos($selected_settlements, 'grandpay') !== false;
+        }
+
+        // 設定データも渡す
+        $options = get_option('usces_ex', array());
+        $grandpay_settings = $options['grandpay'] ?? array();
+
+        $admin_data = array(
             'ajaxurl' => admin_url('admin-ajax.php'),
-            'nonce'   => wp_create_nonce(WELCART_GRANDPAY_PAYMENT_SLUG)
+            'nonce'   => wp_create_nonce(WELCART_GRANDPAY_PAYMENT_SLUG),
+            'is_selected' => $is_grandpay_selected,
+            'settings' => $grandpay_settings,
+            'debug' => defined('WP_DEBUG') && WP_DEBUG
         );
-        wp_localize_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-admin', 'admin', $admin);
+
+        wp_localize_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-admin', 'grandpay_admin', $admin_data);
+
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('GrandPay Admin: Scripts enqueued for settlement page');
+            error_log('GrandPay Admin: is_selected = ' . ($is_grandpay_selected ? 'true' : 'false'));
+        }
     }
 
     function plugin_action_links($links) {
