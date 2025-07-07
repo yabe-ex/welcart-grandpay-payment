@@ -215,17 +215,47 @@ class WelcartGrandpayPaymentAdmin {
 
         // ログテスト処理
         if (isset($_POST['test_log'])) {
-            error_log('GrandPay: Log test from admin page - ' . current_time('Y-m-d H:i:s'));
-            $log_test_result = '<div class="notice notice-info"><p>📝 ログテストを実行しました。/wp-content/debug.log を確認してください。</p></div>';
+            if (wp_verify_nonce($_POST['_wpnonce'], 'grandpay_test_log')) {
+                error_log('GrandPay: Log test from admin page - ' . current_time('Y-m-d H:i:s'));
+                $log_test_result = '<div class="notice notice-info"><p>📝 ログテストを実行しました。/wp-content/debug.log を確認してください。</p></div>';
+            }
         }
 
         // テスト接続処理
         if (isset($_POST['test_connection'])) {
-            $token = $api->get_access_token();
-            if ($token) {
-                $test_result = '<div class="notice notice-success"><p>✓ API接続テスト成功</p></div>';
-            } else {
-                $test_result = '<div class="notice notice-error"><p>✗ API接続テスト失敗</p></div>';
+            if (wp_verify_nonce($_POST['_wpnonce'], 'grandpay_test_connection')) {
+                $test_connection_result = $api->test_connection();
+                if (isset($test_connection_result['success'])) {
+                    $test_result = '<div class="notice notice-success"><p>✓ API接続テスト成功 - ' . $test_connection_result['message'] . '</p></div>';
+                } else {
+                    $test_result = '<div class="notice notice-error"><p>✗ API接続テスト失敗 - ' . $test_connection_result['error'] . '</p></div>';
+                }
+            }
+        }
+
+        // 詳細API診断処理
+        if (isset($_POST['test_api_detailed'])) {
+            if (wp_verify_nonce($_POST['_wpnonce'], 'grandpay_test_api_detailed')) {
+                $detailed_result = $this->run_detailed_api_test($api);
+            }
+        }
+
+        // エンドポイント検出処理
+        if (isset($_POST['discover_endpoints'])) {
+            if (wp_verify_nonce($_POST['_wpnonce'], 'grandpay_discover_endpoints')) {
+                $discovery_result = $this->run_endpoint_discovery($api);
+            }
+        }
+
+        // モックトークンテスト処理
+        if (isset($_POST['test_mock_token'])) {
+            if (wp_verify_nonce($_POST['_wpnonce'], 'grandpay_test_mock_token')) {
+                $mock_token = $api->get_mock_access_token();
+                if ($mock_token) {
+                    $mock_result = '<div class="notice notice-success"><p>✓ モックトークン生成成功: ' . substr($mock_token, 0, 20) . '...</p></div>';
+                } else {
+                    $mock_result = '<div class="notice notice-warning"><p>⚠️ モックトークンは本番モードでは無効です</p></div>';
+                }
             }
         }
 
@@ -247,11 +277,12 @@ class WelcartGrandpayPaymentAdmin {
 
         ?>
         <div class="wrap">
-            <h1><?php echo WELCART_GRANDPAY_PAYMENT_NAME; ?> - デバッグ設定</h1>
+            <h1><?php echo WELCART_GRANDPAY_PAYMENT_NAME; ?> - デバッグ＆管理</h1>
 
             <?php
             if (isset($test_result)) echo $test_result;
             if (isset($log_test_result)) echo $log_test_result;
+            if (isset($mock_result)) echo $mock_result;
             ?>
 
             <div class="card">
@@ -353,15 +384,11 @@ class WelcartGrandpayPaymentAdmin {
                     </tr>
                     <tr>
                         <th>Tenant Key</th>
-                        <td><?php echo !empty($grandpay_settings['tenant_key']) ? '設定済み' : '未設定'; ?></td>
+                        <td><?php echo !empty($grandpay_settings['tenant_key']) ? '設定済み (' . substr($grandpay_settings['tenant_key'], 0, 10) . '...)' : '未設定'; ?></td>
                     </tr>
                     <tr>
                         <th>Client ID</th>
-                        <td><?php echo !empty($grandpay_settings['client_id']) ? '設定済み' : '未設定'; ?></td>
-                    </tr>
-                    <tr>
-                        <th>Client Secret</th>
-                        <td><?php echo !empty($grandpay_settings['client_secret']) ? '設定済み' : '未設定'; ?></td>
+                        <td><?php echo !empty($grandpay_settings['client_id']) ? '設定済み (' . substr($grandpay_settings['client_id'], 0, 10) . '...)' : '未設定'; ?></td>
                     </tr>
                     <tr>
                         <th>Webhook URL</th>
@@ -372,21 +399,62 @@ class WelcartGrandpayPaymentAdmin {
 
             <div class="card">
                 <h2>🧪 テスト機能</h2>
-                <form method="post" style="display: inline-block; margin-right: 10px;">
-                    <?php wp_nonce_field('grandpay_test_log'); ?>
-                    <p>
-                        <input type="submit" name="test_log" class="button button-secondary" value="ログテスト" />
-                    </p>
-                    <p class="description">デバッグログにテストメッセージを出力します。</p>
-                </form>
 
-                <form method="post" style="display: inline-block;">
-                    <?php wp_nonce_field('grandpay_test_connection'); ?>
-                    <p>
-                        <input type="submit" name="test_connection" class="button button-secondary" value="API接続テスト" />
-                    </p>
-                    <p class="description">設定されたAPI情報でGrandPayサーバーに接続できるかテストします。</p>
-                </form>
+                <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">
+                    <form method="post" style="display: inline-block;">
+                        <?php wp_nonce_field('grandpay_test_log'); ?>
+                        <p>
+                            <input type="submit" name="test_log" class="button button-secondary" value="ログテスト" />
+                        </p>
+                        <p class="description">デバッグログにテストメッセージを出力します。</p>
+                    </form>
+
+                    <form method="post" style="display: inline-block;">
+                        <?php wp_nonce_field('grandpay_test_connection'); ?>
+                        <p>
+                            <input type="submit" name="test_connection" class="button button-secondary" value="API接続テスト" />
+                        </p>
+                        <p class="description">設定されたAPI情報でGrandPayサーバーに接続できるかテストします。</p>
+                    </form>
+
+                    <form method="post" style="display: inline-block;">
+                        <?php wp_nonce_field('grandpay_test_api_detailed'); ?>
+                        <p>
+                            <input type="submit" name="test_api_detailed" class="button button-secondary" value="詳細API診断" />
+                        </p>
+                        <p class="description">API接続の詳細な診断を行います。</p>
+                    </form>
+
+                    <form method="post" style="display: inline-block;">
+                        <?php wp_nonce_field('grandpay_discover_endpoints'); ?>
+                        <p>
+                            <input type="submit" name="discover_endpoints" class="button button-primary" value="エンドポイント検出" />
+                        </p>
+                        <p class="description">利用可能なAPIエンドポイントを探します。</p>
+                    </form>
+
+                    <form method="post" style="display: inline-block;">
+                        <?php wp_nonce_field('grandpay_test_mock_token'); ?>
+                        <p>
+                            <input type="submit" name="test_mock_token" class="button button-primary" value="モックトークンテスト" />
+                        </p>
+                        <p class="description">テスト用のモックトークンを生成します。</p>
+                    </form>
+                </div>
+
+                <?php if (isset($detailed_result)): ?>
+                    <div style="margin-top: 20px;">
+                        <h4>🔍 詳細API診断結果</h4>
+                        <pre style="background: #f1f1f1; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;"><?php echo esc_html($detailed_result); ?></pre>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (isset($discovery_result)): ?>
+                    <div style="margin-top: 20px;">
+                        <h4>🔍 エンドポイント検出結果</h4>
+                        <pre style="background: #f1f1f1; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;"><?php echo esc_html($discovery_result); ?></pre>
+                    </div>
+                <?php endif; ?>
             </div>
 
             <div class="card">
@@ -414,12 +482,212 @@ class WelcartGrandpayPaymentAdmin {
                 box-shadow: 0 1px 1px rgba(0, 0, 0, .04);
                 margin: 20px 0;
                 padding: 20px;
+                border-radius: 6px;
             }
 
             .card h2 {
                 margin-top: 0;
+                color: #23282d;
+            }
+
+            .card .form-table th {
+                width: 200px;
+                font-weight: 600;
+            }
+
+            .description {
+                font-size: 13px;
+                color: #666;
+                margin: 5px 0;
             }
         </style>
 <?php
+    }
+
+    /**
+     * 詳細APIテストの実行
+     */
+    private function run_detailed_api_test($api) {
+        $output = "=== GrandPay API 詳細診断 ===\n";
+        $output .= "実行時刻: " . current_time('Y-m-d H:i:s') . "\n\n";
+
+        // 1. 設定値確認
+        $output .= "1. 設定値確認\n";
+        $output .= "   Tenant Key: " . (get_option('welcart_grandpay_tenant_key') ? '設定済み (' . substr(get_option('welcart_grandpay_tenant_key'), 0, 10) . '...)' : '未設定') . "\n";
+        $output .= "   Client ID: " . (get_option('welcart_grandpay_client_id') ? '設定済み (' . substr(get_option('welcart_grandpay_client_id'), 0, 10) . '...)' : '未設定') . "\n";
+        $output .= "   Test Mode: " . (get_option('welcart_grandpay_test_mode') ? 'ON' : 'OFF') . "\n\n";
+
+        // 2. ネットワーク接続確認
+        $output .= "2. ネットワーク接続確認\n";
+        $ping_url = 'https://api.payment-gateway.asia';
+        $ping_response = wp_remote_get($ping_url, array('timeout' => 10));
+
+        if (is_wp_error($ping_response)) {
+            $output .= "   ❌ ベースURL接続失敗: " . $ping_response->get_error_message() . "\n";
+        } else {
+            $response_code = wp_remote_retrieve_response_code($ping_response);
+            $output .= "   ✅ ベースURL接続成功 (HTTP $response_code)\n";
+        }
+
+        // 3. SSL証明書確認
+        $output .= "\n3. SSL証明書確認\n";
+        $ssl_response = wp_remote_get($ping_url, array(
+            'timeout' => 10,
+            'sslverify' => true
+        ));
+
+        if (is_wp_error($ssl_response)) {
+            $output .= "   ⚠️  SSL証明書に問題: " . $ssl_response->get_error_message() . "\n";
+        } else {
+            $output .= "   ✅ SSL証明書正常\n";
+        }
+
+        // 4. OAuth2エンドポイント確認
+        $output .= "\n4. OAuth2エンドポイント確認\n";
+        $oauth_url = 'https://api.payment-gateway.asia/oauth2/token';
+
+        // まず設定値チェック
+        $client_id = get_option('welcart_grandpay_client_id');
+        if (empty($client_id)) {
+            $output .= "   ❌ Client IDが設定されていません\n";
+        } else {
+            // OAuth2リクエストを実行
+            $auth_string = base64_encode($client_id . ':');
+            $headers = array(
+                'Authorization' => 'Basic ' . $auth_string,
+                'Content-Type' => 'application/x-www-form-urlencoded',
+                'User-Agent' => 'Welcart-GrandPay/' . WELCART_GRANDPAY_PAYMENT_VERSION,
+                'Accept' => 'application/json'
+            );
+
+            $body = array('grant_type' => 'client_credentials');
+
+            $oauth_response = wp_remote_post($oauth_url, array(
+                'headers' => $headers,
+                'body' => http_build_query($body),
+                'timeout' => 30,
+                'sslverify' => !get_option('welcart_grandpay_test_mode', false)
+            ));
+
+            if (is_wp_error($oauth_response)) {
+                $output .= "   ❌ OAuth2リクエスト失敗: " . $oauth_response->get_error_message() . "\n";
+            } else {
+                $response_code = wp_remote_retrieve_response_code($oauth_response);
+                $response_body = wp_remote_retrieve_body($oauth_response);
+                $response_headers = wp_remote_retrieve_headers($oauth_response);
+
+                $output .= "   レスポンスコード: $response_code\n";
+                $output .= "   レスポンスヘッダー:\n";
+                foreach ($response_headers as $header_name => $header_value) {
+                    $output .= "     $header_name: $header_value\n";
+                }
+
+                $output .= "   レスポンスボディ: " . substr($response_body, 0, 500) . "\n";
+
+                if ($response_code === 200) {
+                    $data = json_decode($response_body, true);
+                    if (isset($data['access_token'])) {
+                        $output .= "   ✅ アクセストークン取得成功\n";
+                        $output .= "   トークンタイプ: " . ($data['token_type'] ?? 'N/A') . "\n";
+                        $output .= "   有効期限: " . ($data['expires_in'] ?? 'N/A') . " 秒\n";
+                    } else {
+                        $output .= "   ❌ レスポンスにaccess_tokenが含まれていません\n";
+                    }
+                } else {
+                    $output .= "   ❌ OAuth2認証失敗 (HTTP $response_code)\n";
+
+                    // エラーの詳細を確認
+                    $error_data = json_decode($response_body, true);
+                    if ($error_data && isset($error_data['error'])) {
+                        $output .= "   エラータイプ: " . $error_data['error'] . "\n";
+                        if (isset($error_data['error_description'])) {
+                            $output .= "   エラー詳細: " . $error_data['error_description'] . "\n";
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. WordPress環境確認
+        $output .= "\n5. WordPress環境確認\n";
+        $output .= "   WordPress バージョン: " . get_bloginfo('version') . "\n";
+        $output .= "   PHP バージョン: " . PHP_VERSION . "\n";
+        $output .= "   cURL 有効: " . (function_exists('curl_version') ? 'YES' : 'NO') . "\n";
+        $output .= "   OpenSSL 有効: " . (function_exists('openssl_get_cert_locations') ? 'YES' : 'NO') . "\n";
+        $output .= "   allow_url_fopen: " . (ini_get('allow_url_fopen') ? 'ON' : 'OFF') . "\n";
+        $output .= "   max_execution_time: " . ini_get('max_execution_time') . " 秒\n";
+        $output .= "   memory_limit: " . ini_get('memory_limit') . "\n";
+
+        // 6. Welcart統合確認
+        $output .= "\n6. Welcart統合確認\n";
+        $output .= "   Welcart 有効: " . (function_exists('usces_get_system_option') ? 'YES' : 'NO') . "\n";
+        if (function_exists('usces_get_system_option')) {
+            global $usces;
+            $acting_flag = $usces->options['acting_settings']['acting_flag'] ?? '';
+            $output .= "   現在のacting_flag: " . ($acting_flag ?: '未設定') . "\n";
+
+            $payment_structure = get_option('usces_payment_structure', array());
+            $grandpay_in_structure = isset($payment_structure['acting_grandpay_card']);
+            $output .= "   GrandPay決済構造登録: " . ($grandpay_in_structure ? 'YES' : 'NO') . "\n";
+        }
+
+        $output .= "\n=== 診断完了 ===";
+
+        return $output;
+    }
+
+    /**
+     * エンドポイント検出の実行
+     */
+    private function run_endpoint_discovery($api) {
+        $output = "=== GrandPay APIエンドポイント検出 ===\n";
+        $output .= "実行時刻: " . current_time('Y-m-d H:i:s') . "\n\n";
+
+        $discovery_results = $api->discover_api_endpoint();
+
+        if (empty($discovery_results)) {
+            $output .= "❌ 利用可能なエンドポイントが見つかりませんでした。\n\n";
+        } else {
+            $output .= "✅ エンドポイント検出結果:\n\n";
+
+            foreach ($discovery_results as $result) {
+                $status_icon = '❌';
+                if ($result['status'] == 200) $status_icon = '✅';
+                elseif (in_array($result['status'], array(400, 401, 405))) $status_icon = '⚠️';
+
+                $output .= sprintf(
+                    "%s %s (HTTP %d)\n",
+                    $status_icon,
+                    $result['url'],
+                    $result['status']
+                );
+
+                // 401や400は認証が必要だが、エンドポイントは存在する
+                if (in_array($result['status'], array(400, 401))) {
+                    $output .= "   → 認証エラーですが、エンドポイントは存在します\n";
+                } elseif ($result['status'] == 405) {
+                    $output .= "   → POSTメソッドが必要かもしれません\n";
+                }
+            }
+        }
+
+        $output .= "\n=== 推奨事項 ===\n";
+        $found_potential = false;
+        foreach ($discovery_results as $result) {
+            if (in_array($result['status'], array(400, 401, 405))) {
+                $output .= "✓ 試してみる価値があるURL: " . $result['url'] . "\n";
+                $found_potential = true;
+            }
+        }
+
+        if (!$found_potential) {
+            $output .= "• APIがまだ公開されていない可能性があります\n";
+            $output .= "• ドキュメントのURLが古い可能性があります\n";
+            $output .= "• テスト環境ではモックトークンを使用することを検討してください\n";
+        }
+
+        $output .= "\n=== 検出完了 ===";
+
+        return $output;
     }
 }

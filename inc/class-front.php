@@ -4,83 +4,186 @@ class WelcartGrandpayPaymentFront {
 
     public function __construct() {
         // Welcartのフロント側フィルターに登録
-        add_filter('usces_filter_payment_list_credit', array($this, 'add_payment_option'));
-        add_action('usces_action_reg_orderdata', array($this, 'save_payment_info'));
+        add_filter('usces_filter_the_payment_method', array($this, 'add_payment_method'));
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
 
-        // ショートコード登録
-        add_shortcode('grandpay_payment_form', array($this, 'payment_form_shortcode'));
+        // AJAX処理
+        add_action('wp_ajax_grandpay_start_payment', array($this, 'ajax_start_payment'));
+        add_action('wp_ajax_nopriv_grandpay_start_payment', array($this, 'ajax_start_payment'));
+
+        error_log('GrandPay Front: Initialized');
     }
 
     /**
-     * 決済オプションリストにGrandPayを追加
+     * 決済方法リストにGrandPayを追加
      */
-    public function add_payment_option($payment_list) {
-        $options = get_option('usces_ex', array());
-        $grandpay_settings = $options['grandpay'] ?? array();
+    public function add_payment_method($payment_methods) {
+        global $usces;
 
-        // GrandPayが有効になっている場合のみ追加
-        if (($grandpay_settings['activate'] ?? '') === 'on') {
-            $payment_name = $grandpay_settings['payment_name'] ?? 'クレジットカード決済（GrandPay）';
-            $payment_description = $grandpay_settings['payment_description'] ?? 'クレジットカードで安全にお支払いいただけます。';
+        // GrandPay設定を取得
+        $grandpay_options = $usces->options['acting_settings']['grandpay'] ?? array();
 
-            $payment_list['grandpay'] = array(
+        // GrandPayが有効な場合のみ追加
+        if (($grandpay_options['activate'] ?? 'off') === 'on') {
+            $payment_name = $grandpay_options['payment_name'] ?? 'クレジットカード決済（GrandPay）';
+            $payment_description = $grandpay_options['payment_description'] ?? 'クレジットカードで安全にお支払いいただけます。';
+
+            $payment_methods['acting_grandpay_card'] = array(
                 'name' => $payment_name,
                 'explanation' => $payment_description,
                 'settlement' => 'credit',
-                'sort' => 1
+                'module' => 'grandpay',
+                'sort' => 10
             );
+
+            error_log('GrandPay Front: Payment method added - ' . $payment_name);
+
+            // acting_flagも確認・設定
+            $current_acting_flag = $usces->options['acting_settings']['acting_flag'] ?? '';
+            if ($current_acting_flag !== 'grandpay') {
+                error_log('GrandPay Front: Warning - acting_flag is not set to grandpay (current: ' . $current_acting_flag . ')');
+            }
+        } else {
+            error_log('GrandPay Front: Payment method not added (not activated)');
         }
 
-        return $payment_list;
-    }
-
-    /**
-     * 注文データ登録時に決済情報を保存
-     */
-    public function save_payment_info($order_id) {
-        if (isset($_POST['offer']['payment_method']) && $_POST['offer']['payment_method'] === 'grandpay') {
-            update_post_meta($order_id, '_payment_method', 'grandpay');
-            update_post_meta($order_id, '_grandpay_payment_status', 'pending');
-        }
+        return $payment_methods;
     }
 
     /**
      * スクリプトとスタイルの読み込み
      */
-    function front_enqueue() {
-        // チェックアウトページでのみ読み込み
-        if (!is_page() || !usces_is_cart_page()) {
+    public function enqueue_scripts() {
+        // Welcartのページかチェック
+        if (!$this->is_welcart_page()) {
             return;
         }
 
         $version = (defined('WELCART_GRANDPAY_PAYMENT_DEVELOP') && true === WELCART_GRANDPAY_PAYMENT_DEVELOP) ? time() : WELCART_GRANDPAY_PAYMENT_VERSION;
-        $strategy = array('in_footer' => true, 'strategy' => 'defer');
 
         wp_register_style(WELCART_GRANDPAY_PAYMENT_SLUG . '-front', WELCART_GRANDPAY_PAYMENT_URL . '/css/front.css', array(), $version);
-        wp_register_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-front', WELCART_GRANDPAY_PAYMENT_URL . '/js/front.js', array('jquery'), $version, $strategy);
+        wp_register_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-front', WELCART_GRANDPAY_PAYMENT_URL . '/js/front.js', array('jquery'), $version, true);
 
         wp_enqueue_style(WELCART_GRANDPAY_PAYMENT_SLUG . '-front');
         wp_enqueue_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-front');
 
-        $front = array(
+        $front_data = array(
             'ajaxurl' => admin_url('admin-ajax.php'),
             'nonce'   => wp_create_nonce(WELCART_GRANDPAY_PAYMENT_SLUG),
             'messages' => array(
                 'processing' => '決済処理中です...',
-                'redirecting' => 'GrandPayの決済ページにリダイレクトしています...'
-            )
+                'redirecting' => 'GrandPayの決済ページにリダイレクトしています...',
+                'error' => '決済処理中にエラーが発生しました。'
+            ),
+            'debug' => defined('WP_DEBUG') && WP_DEBUG
         );
-        wp_localize_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-front', 'grandpay_front', $front);
+        wp_localize_script(WELCART_GRANDPAY_PAYMENT_SLUG . '-front', 'grandpay_front', $front_data);
+
+        error_log('GrandPay Front: Scripts enqueued');
     }
 
     /**
-     * 決済フォームのショートコード
+     * Welcartページかどうかチェック
      */
-    public function payment_form_shortcode($atts) {
+    private function is_welcart_page() {
+        // カートページ、チェックアウトページ、完了ページなどをチェック
+        global $usces;
+
+        if (function_exists('usces_is_cart_page') && usces_is_cart_page()) {
+            return true;
+        }
+
+        if (function_exists('usces_is_member_page') && usces_is_member_page()) {
+            return true;
+        }
+
+        // URLベースでのチェック
+        $current_url = $_SERVER['REQUEST_URI'] ?? '';
+        $welcart_pages = array('/cart/', '/checkout/', '/member/', '/complete/');
+
+        foreach ($welcart_pages as $page) {
+            if (strpos($current_url, $page) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * AJAX: 決済開始処理
+     */
+    public function ajax_start_payment() {
+        check_ajax_referer(WELCART_GRANDPAY_PAYMENT_SLUG, 'nonce');
+
+        error_log('GrandPay Front: AJAX start payment called');
+
+        $order_id = intval($_POST['order_id'] ?? 0);
+
+        if (!$order_id) {
+            error_log('GrandPay Front: Invalid order ID');
+            wp_send_json_error(array('message' => '注文IDが無効です'));
+        }
+
+        // 注文データを取得
+        $order = get_post($order_id);
+        if (!$order || $order->post_type !== 'shop_order') {
+            error_log('GrandPay Front: Order not found: ' . $order_id);
+            wp_send_json_error(array('message' => '注文が見つかりません'));
+        }
+
+        error_log('GrandPay Front: Processing order: ' . $order_id);
+
+        // API通信
+        $api = new WelcartGrandpayAPI();
+
+        // 注文情報を構築
+        $order_data = array(
+            'order_id' => $order_id,
+            'amount' => get_post_meta($order_id, '_order_total', true) ?: 1000, // デフォルト値
+            'email' => get_post_meta($order_id, '_customer_email', true) ?: 'test@example.com',
+            'phone' => get_post_meta($order_id, '_customer_tel', true) ?: '',
+            'name' => get_post_meta($order_id, '_customer_name', true) ?: 'Test Customer',
+            'success_url' => add_query_arg(array(
+                'grandpay_result' => 'success',
+                'order_id' => $order_id
+            ), home_url('/checkout/complete/')),
+            'failure_url' => add_query_arg(array(
+                'grandpay_result' => 'failure',
+                'order_id' => $order_id
+            ), home_url('/checkout/'))
+        );
+
+        error_log('GrandPay Front: Order data: ' . print_r($order_data, true));
+
+        $result = $api->create_checkout_session($order_data);
+
+        if (isset($result['error'])) {
+            error_log('GrandPay Front: Checkout session creation failed: ' . $result['error']);
+            wp_send_json_error(array('message' => $result['error']));
+        }
+
+        if (isset($result['checkout_url'])) {
+            // セッション情報を保存
+            update_post_meta($order_id, '_grandpay_session_id', $result['session_id']);
+            update_post_meta($order_id, '_grandpay_checkout_url', $result['checkout_url']);
+            update_post_meta($order_id, '_grandpay_payment_status', 'pending');
+
+            error_log('GrandPay Front: Checkout URL created: ' . $result['checkout_url']);
+
+            wp_send_json_success(array('checkout_url' => $result['checkout_url']));
+        }
+
+        error_log('GrandPay Front: Unexpected error in checkout session creation');
+        wp_send_json_error(array('message' => '予期しないエラーが発生しました'));
+    }
+
+    /**
+     * 決済状況表示のショートコード
+     */
+    public function payment_status_shortcode($atts) {
         $atts = shortcode_atts(array(
-            'order_id' => 0,
-            'style' => 'default'
+            'order_id' => 0
         ), $atts);
 
         if (!$atts['order_id']) {
@@ -98,198 +201,35 @@ class WelcartGrandpayPaymentFront {
 
         ob_start();
 ?>
-        <div id="grandpay-payment-form" class="grandpay-payment-container">
+        <div class="grandpay-payment-status">
             <?php if ($payment_status === 'pending'): ?>
-                <div class="grandpay-payment-info">
-                    <h3>クレジットカード決済</h3>
-                    <p>以下のボタンをクリックして、安全な決済ページで決済を完了してください。</p>
-                    <button type="button" id="grandpay-payment-button" class="grandpay-payment-btn">
-                        決済ページへ進む
-                    </button>
-                </div>
-                <div id="grandpay-loading" class="grandpay-loading" style="display: none;">
-                    <p>決済ページに移動しています...</p>
-                    <div class="grandpay-spinner"></div>
+                <div class="grandpay-status-pending">
+                    <h3>⏳ 決済処理中</h3>
+                    <p>決済処理を進めています。しばらくお待ちください。</p>
                 </div>
             <?php elseif ($payment_status === 'completed'): ?>
-                <div class="grandpay-payment-complete">
-                    <h3>✓ 決済完了</h3>
+                <div class="grandpay-status-completed">
+                    <h3>✅ 決済完了</h3>
                     <p>決済が正常に完了しました。</p>
                 </div>
             <?php elseif ($payment_status === 'failed'): ?>
-                <div class="grandpay-payment-failed">
-                    <h3>✗ 決済失敗</h3>
+                <div class="grandpay-status-failed">
+                    <h3>❌ 決済失敗</h3>
                     <p>決済に失敗しました。お手数ですが、再度お試しください。</p>
-                    <button type="button" id="grandpay-retry-button" class="grandpay-payment-btn">
-                        再度決済する
-                    </button>
+                </div>
+            <?php else: ?>
+                <div class="grandpay-status-unknown">
+                    <h3>❓ 状況不明</h3>
+                    <p>決済状況が不明です。お手数ですが、サポートまでお問い合わせください。</p>
                 </div>
             <?php endif; ?>
         </div>
-
-        <script type="text/javascript">
-            jQuery(document).ready(function($) {
-                $('#grandpay-payment-button, #grandpay-retry-button').click(function() {
-                    $('#grandpay-loading').show();
-                    $(this).prop('disabled', true);
-
-                    // GrandPayの決済処理開始
-                    $.ajax({
-                        url: grandpay_front.ajaxurl,
-                        type: 'POST',
-                        data: {
-                            action: 'grandpay_start_payment',
-                            order_id: <?php echo $order_id; ?>,
-                            nonce: grandpay_front.nonce
-                        },
-                        success: function(response) {
-                            if (response.success && response.data.checkout_url) {
-                                window.location.href = response.data.checkout_url;
-                            } else {
-                                alert('決済処理中にエラーが発生しました: ' + (response.data.message || ''));
-                                $('#grandpay-loading').hide();
-                                $('.grandpay-payment-btn').prop('disabled', false);
-                            }
-                        },
-                        error: function() {
-                            alert('通信エラーが発生しました。');
-                            $('#grandpay-loading').hide();
-                            $('.grandpay-payment-btn').prop('disabled', false);
-                        }
-                    });
-                });
-            });
-        </script>
-
-        <style>
-            .grandpay-payment-container {
-                border: 1px solid #ddd;
-                padding: 20px;
-                border-radius: 5px;
-                background-color: #f9f9f9;
-                margin: 20px 0;
-            }
-
-            .grandpay-payment-btn {
-                background-color: #0073aa;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                font-size: 16px;
-                border-radius: 3px;
-                cursor: pointer;
-                transition: background-color 0.3s;
-            }
-
-            .grandpay-payment-btn:hover {
-                background-color: #005a87;
-            }
-
-            .grandpay-payment-btn:disabled {
-                background-color: #ccc;
-                cursor: not-allowed;
-            }
-
-            .grandpay-loading {
-                text-align: center;
-                padding: 20px;
-            }
-
-            .grandpay-spinner {
-                border: 4px solid #f3f3f3;
-                border-top: 4px solid #3498db;
-                border-radius: 50%;
-                width: 30px;
-                height: 30px;
-                animation: spin 2s linear infinite;
-                margin: 10px auto;
-            }
-
-            @keyframes spin {
-                0% {
-                    transform: rotate(0deg);
-                }
-
-                100% {
-                    transform: rotate(360deg);
-                }
-            }
-
-            .grandpay-payment-complete {
-                color: #46b450;
-            }
-
-            .grandpay-payment-failed {
-                color: #dc3232;
-            }
-        </style>
 <?php
         return ob_get_clean();
     }
+}
 
-    /**
-     * AJAX: 決済開始処理
-     */
-    public function ajax_start_payment() {
-        check_ajax_referer(WELCART_GRANDPAY_PAYMENT_SLUG, 'nonce');
-
-        $order_id = intval($_POST['order_id'] ?? 0);
-
-        if (!$order_id) {
-            wp_send_json_error(array('message' => '注文IDが無効です'));
-        }
-
-        // 注文データを取得
-        $order = get_post($order_id);
-        if (!$order || $order->post_type !== 'shop_order') {
-            wp_send_json_error(array('message' => '注文が見つかりません'));
-        }
-
-        // 決済処理
-        $api = new WelcartGrandpayAPI();
-
-        // 注文情報を構築
-        $order_data = array(
-            'order_id' => $order_id,
-            'amount' => get_post_meta($order_id, '_order_total', true),
-            'email' => get_post_meta($order_id, '_customer_email', true),
-            'phone' => get_post_meta($order_id, '_customer_tel', true),
-            'success_url' => add_query_arg(array(
-                'grandpay_result' => 'success',
-                'order_id' => $order_id
-            ), home_url('/checkout/complete/')),
-            'failure_url' => add_query_arg(array(
-                'grandpay_result' => 'failure',
-                'order_id' => $order_id
-            ), home_url('/checkout/'))
-        );
-
-        $result = $api->create_checkout_session($order_data);
-
-        if (isset($result['error'])) {
-            wp_send_json_error(array('message' => $result['error']));
-        }
-
-        if (isset($result['checkout_url'])) {
-            // セッション情報を保存
-            update_post_meta($order_id, '_grandpay_session_id', $result['session_id']);
-            update_post_meta($order_id, '_grandpay_checkout_url', $result['checkout_url']);
-
-            wp_send_json_success(array('checkout_url' => $result['checkout_url']));
-        }
-
-        wp_send_json_error(array('message' => '予期しないエラーが発生しました'));
-    }
-
-    /**
-     * スクリプト読み込み（修正版）
-     */
-    public function enqueue_scripts() {
-        // AJAX ハンドラーを登録
-        add_action('wp_ajax_grandpay_start_payment', array($this, 'ajax_start_payment'));
-        add_action('wp_ajax_nopriv_grandpay_start_payment', array($this, 'ajax_start_payment'));
-
-        // フロント側のスクリプト読み込み
-        $this->front_enqueue();
-    }
+// ショートコード登録
+if (!shortcode_exists('grandpay_payment_status')) {
+    add_shortcode('grandpay_payment_status', array(new WelcartGrandpayPaymentFront(), 'payment_status_shortcode'));
 }

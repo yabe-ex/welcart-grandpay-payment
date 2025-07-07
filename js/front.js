@@ -2,8 +2,10 @@ jQuery(document).ready(function ($) {
     // GrandPay 決済処理のメイン関数
     const GrandPayPayment = {
         init: function () {
+            console.log('🔧 GrandPay Front Script Loaded');
             this.bindEvents();
             this.checkUrlParams();
+            this.monitorPaymentMethodSelection();
         },
 
         bindEvents: function () {
@@ -11,10 +13,10 @@ jQuery(document).ready(function ($) {
             $(document).on('click', '#grandpay-payment-button, #grandpay-retry-button', this.handlePaymentClick);
 
             // 決済方法選択時の処理
-            $(document).on('change', 'input[name="offer[payment_method]"]', this.handlePaymentMethodChange);
+            $(document).on('change', 'input[name*="payment"]', this.handlePaymentMethodChange);
 
-            // フォーム送信時の処理
-            $(document).on('submit', '.usces_cart_form', this.handleFormSubmit);
+            // フォーム送信時の処理（GrandPay選択時）
+            $(document).on('submit', 'form[name="customer_form"], .usces_cart_form', this.handleFormSubmit);
         },
 
         handlePaymentClick: function (e) {
@@ -22,6 +24,8 @@ jQuery(document).ready(function ($) {
 
             const $button = $(this);
             const orderId = $button.data('order-id') || GrandPayPayment.getOrderIdFromPage();
+
+            console.log('🔄 GrandPay payment button clicked, Order ID:', orderId);
 
             if (!orderId) {
                 GrandPayPayment.showError('注文IDが見つかりません。');
@@ -32,9 +36,13 @@ jQuery(document).ready(function ($) {
         },
 
         startPayment: function (orderId, $button) {
+            console.log('🚀 Starting GrandPay payment for order:', orderId);
+
             // ローディング状態を表示
             this.showLoading();
-            $button.prop('disabled', true);
+            if ($button) {
+                $button.prop('disabled', true);
+            }
 
             // AJAX で決済セッションを作成
             $.ajax({
@@ -47,20 +55,28 @@ jQuery(document).ready(function ($) {
                 },
                 timeout: 30000,
                 success: function (response) {
+                    console.log('✅ GrandPay AJAX response:', response);
+
                     if (response.success && response.data.checkout_url) {
                         // 成功メッセージを表示してからリダイレクト
                         GrandPayPayment.showRedirectMessage();
                         setTimeout(function () {
+                            console.log('🔗 Redirecting to:', response.data.checkout_url);
                             window.location.href = response.data.checkout_url;
                         }, 1500);
                     } else {
                         const errorMessage = response.data && response.data.message ? response.data.message : '決済処理中にエラーが発生しました。';
+                        console.error('❌ GrandPay error:', errorMessage);
                         GrandPayPayment.showError(errorMessage);
                         GrandPayPayment.hideLoading();
-                        $button.prop('disabled', false);
+                        if ($button) {
+                            $button.prop('disabled', false);
+                        }
                     }
                 },
                 error: function (xhr, status, error) {
+                    console.error('❌ GrandPay AJAX error:', status, error);
+
                     let errorMessage = '通信エラーが発生しました。';
 
                     if (status === 'timeout') {
@@ -71,16 +87,20 @@ jQuery(document).ready(function ($) {
 
                     GrandPayPayment.showError(errorMessage);
                     GrandPayPayment.hideLoading();
-                    $button.prop('disabled', false);
+                    if ($button) {
+                        $button.prop('disabled', false);
+                    }
                 }
             });
         },
 
         handlePaymentMethodChange: function () {
             const selectedMethod = $(this).val();
+            console.log('💳 Payment method changed:', selectedMethod);
 
-            if (selectedMethod === 'grandpay') {
+            if (selectedMethod === 'acting_grandpay_card' || ($(this).is(':checked') && $(this).closest('label').text().indexOf('GrandPay') !== -1)) {
                 // GrandPay選択時の処理
+                console.log('✅ GrandPay selected');
                 GrandPayPayment.showGrandPayInfo();
             } else {
                 // 他の決済方法選択時
@@ -89,35 +109,62 @@ jQuery(document).ready(function ($) {
         },
 
         handleFormSubmit: function (e) {
-            const selectedMethod = $('input[name="offer[payment_method]"]:checked').val();
+            // GrandPayが選択されているかチェック
+            const isGrandPaySelected = GrandPayPayment.isGrandPaySelected();
 
-            if (selectedMethod === 'grandpay') {
-                // フォーム送信を一時停止してGrandPay処理を開始
-                e.preventDefault();
+            console.log('📋 Form submit detected, GrandPay selected:', isGrandPaySelected);
 
-                // フォームデータを取得して注文を作成
-                const formData = new FormData(this);
-
-                $.ajax({
-                    url: $(this).attr('action'),
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    success: function (response) {
-                        // 注文作成成功後、決済処理開始
-                        const orderId = GrandPayPayment.extractOrderIdFromResponse(response);
-                        if (orderId) {
-                            GrandPayPayment.startPayment(orderId, $('.grandpay-payment-btn'));
-                        } else {
-                            GrandPayPayment.showError('注文の作成に失敗しました。');
-                        }
-                    },
-                    error: function () {
-                        GrandPayPayment.showError('注文の作成中にエラーが発生しました。');
-                    }
-                });
+            if (!isGrandPaySelected) {
+                return; // 通常の処理を続行
             }
+
+            // GrandPay選択時は通常の決済フローに任せる
+            console.log('🔄 GrandPay selected, letting Welcart handle the form submission');
+        },
+
+        isGrandPaySelected: function () {
+            // 複数の方法でGrandPay選択状態を確認
+            let isSelected = false;
+
+            // 1. acting_grandpay_card という値をチェック
+            $('input[type="radio"][name*="payment"]:checked').each(function () {
+                if ($(this).val() === 'acting_grandpay_card') {
+                    isSelected = true;
+                }
+            });
+
+            // 2. labelテキストでGrandPayを含むものをチェック
+            $('input[type="radio"]:checked').each(function () {
+                if ($(this).closest('label').text().indexOf('GrandPay') !== -1) {
+                    isSelected = true;
+                }
+            });
+
+            // 3. nameやidにgrandpayを含むものをチェック
+            $('input[type="radio"]:checked').each(function () {
+                const name = $(this).attr('name') || '';
+                const id = $(this).attr('id') || '';
+                const value = $(this).val() || '';
+
+                if (
+                    name.toLowerCase().indexOf('grandpay') !== -1 ||
+                    id.toLowerCase().indexOf('grandpay') !== -1 ||
+                    value.toLowerCase().indexOf('grandpay') !== -1
+                ) {
+                    isSelected = true;
+                }
+            });
+
+            return isSelected;
+        },
+
+        monitorPaymentMethodSelection: function () {
+            // ページロード時の決済方法チェック
+            setTimeout(() => {
+                if (this.isGrandPaySelected()) {
+                    this.showGrandPayInfo();
+                }
+            }, 1000);
         },
 
         showLoading: function () {
@@ -136,7 +183,13 @@ jQuery(document).ready(function ($) {
                         <div class="grandpay-spinner"></div>
                     </div>
                 `;
-                $('.grandpay-payment-container').append(loadingHtml);
+
+                // コンテナがあれば追加、なければbodyに追加
+                if ($('.grandpay-payment-container').length) {
+                    $('.grandpay-payment-container').append(loadingHtml);
+                } else {
+                    $('body').append(loadingHtml);
+                }
             }
         },
 
@@ -158,6 +211,8 @@ jQuery(document).ready(function ($) {
         },
 
         showError: function (message) {
+            console.error('❌ GrandPay Error:', message);
+
             // エラーメッセージを表示
             const errorHtml = `
                 <div class="grandpay-error-message" style="
@@ -168,8 +223,10 @@ jQuery(document).ready(function ($) {
                     border-radius: 4px;
                     margin: 16px 0;
                     font-weight: 500;
+                    position: relative;
+                    z-index: 9999;
                 ">
-                    ${message}
+                    ❌ ${message}
                 </div>
             `;
 
@@ -177,15 +234,21 @@ jQuery(document).ready(function ($) {
             $('.grandpay-error-message').remove();
 
             // 新しいエラーメッセージを追加
-            $('.grandpay-payment-container').prepend(errorHtml);
+            if ($('.grandpay-payment-container').length) {
+                $('.grandpay-payment-container').prepend(errorHtml);
+            } else {
+                $('body').prepend(errorHtml);
+            }
 
-            // 3秒後に自動で非表示
+            // 5秒後に自動で非表示
             setTimeout(function () {
                 $('.grandpay-error-message').fadeOut();
             }, 5000);
         },
 
         showGrandPayInfo: function () {
+            console.log('ℹ️ Showing GrandPay info');
+
             // GrandPay選択時の説明を表示
             const infoHtml = `
                 <div class="grandpay-payment-info-box" style="
@@ -196,14 +259,24 @@ jQuery(document).ready(function ($) {
                     margin-top: 12px;
                 ">
                     <p style="margin: 0; color: #0073aa; font-size: 14px;">
-                        <strong>💳 クレジットカード決済</strong><br>
+                        <strong>💳 クレジットカード決済（GrandPay）</strong><br>
                         次のページで安全にクレジットカード情報を入力してお支払いいただけます。
                     </p>
                 </div>
             `;
 
+            // 既存の情報ボックスを削除
             $('.grandpay-payment-info-box').remove();
-            $('input[value="grandpay"]').closest('label').after(infoHtml);
+
+            // GrandPay関連の要素を探して情報を追加
+            $('input[value="acting_grandpay_card"], input[value*="grandpay"]').each(function () {
+                $(this).closest('label').after(infoHtml);
+            });
+
+            // テキストでGrandPayを含むlabelの後に追加
+            $('label:contains("GrandPay")').each(function () {
+                $(this).after(infoHtml);
+            });
         },
 
         hideGrandPayInfo: function () {
@@ -225,24 +298,10 @@ jQuery(document).ready(function ($) {
                 return dataOrderId;
             }
 
-            return null;
-        },
-
-        extractOrderIdFromResponse: function (response) {
-            // レスポンスから注文IDを抽出（実装は実際のレスポンス形式に合わせて調整）
-            try {
-                if (typeof response === 'string') {
-                    const match = response.match(/order_id[=:](\d+)/);
-                    if (match) {
-                        return match[1];
-                    }
-                }
-
-                if (response && response.order_id) {
-                    return response.order_id;
-                }
-            } catch (e) {
-                console.error('Order ID extraction failed:', e);
+            // hidden inputから取得を試行
+            const hiddenOrderId = $('input[name="order_id"]').val();
+            if (hiddenOrderId) {
+                return hiddenOrderId;
             }
 
             return null;
@@ -258,6 +317,23 @@ jQuery(document).ready(function ($) {
             } else if (result === 'failure') {
                 this.showFailureMessage();
             }
+
+            // エラーパラメータもチェック
+            const error = urlParams.get('error');
+            if (error) {
+                let errorMessage = '決済処理中にエラーが発生しました。';
+
+                switch (error) {
+                    case 'payment_failed':
+                        errorMessage = '決済に失敗しました。再度お試しください。';
+                        break;
+                    case 'payment_verification_failed':
+                        errorMessage = '決済の確認に失敗しました。サポートまでお問い合わせください。';
+                        break;
+                }
+
+                this.showError(errorMessage);
+            }
         },
 
         showSuccessMessage: function () {
@@ -272,7 +348,7 @@ jQuery(document).ready(function ($) {
                     text-align: center;
                     font-weight: 600;
                 ">
-                    ✓ 決済が完了しました
+                    ✅ 決済が完了しました
                 </div>
             `;
 
@@ -291,7 +367,7 @@ jQuery(document).ready(function ($) {
                     text-align: center;
                     font-weight: 600;
                 ">
-                    ✗ 決済に失敗しました
+                    ❌ 決済に失敗しました
                 </div>
             `;
 
@@ -305,5 +381,11 @@ jQuery(document).ready(function ($) {
     // グローバルに公開（デバッグ用）
     if (typeof window !== 'undefined') {
         window.GrandPayPayment = GrandPayPayment;
+    }
+
+    // デバッグ用ログ
+    if (typeof grandpay_front !== 'undefined' && grandpay_front.debug) {
+        console.log('🔧 GrandPay debug mode enabled');
+        console.log('📊 GrandPay front config:', grandpay_front);
     }
 });
