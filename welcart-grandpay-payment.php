@@ -57,25 +57,6 @@ class WelcartGrandpayPayment {
         add_action('plugins_loaded', array($this, 'init'), 20);
         register_activation_hook(__FILE__, array($this, 'on_activation'));
         register_deactivation_hook(__FILE__, array($this, 'on_deactivation'));
-
-        // 決済モジュール登録（最重要）
-        add_action('admin_init', array($this, 'register_settlement_module'), 10);
-    }
-
-    /**
-     * 決済モジュールの登録（functions.phpから移行）
-     */
-    public function register_settlement_module() {
-        // 文字列形式での正しい登録
-        $available_settlement = get_option('usces_available_settlement', array());
-
-        if (!isset($available_settlement['grandpay'])) {
-            // 他のモジュールと同じ文字列形式で登録
-            $available_settlement['grandpay'] = 'GrandPay';
-
-            update_option('usces_available_settlement', $available_settlement);
-            error_log('🎉 GrandPay registered in settlement modules!');
-        }
     }
 
     public function init() {
@@ -196,19 +177,57 @@ class WelcartGrandpayPayment {
                 'activate' => 'off',
                 'test_mode' => 'on',
                 'payment_name' => 'クレジットカード決済',
-                'payment_description' => 'クレジットカードで安全にお支払いいただけます。'
+                'payment_description' => 'クレジットカードで安全にお支払いいただけます。',
+                'tenant_key' => '',
+                'client_id' => '',
+                'client_secret' => '',
+                'webhook_secret' => ''
             );
             update_option('usces_ex', $options);
+            error_log('GrandPay: Default settings created');
         }
 
         // 決済モジュールファイルをコピー
         $this->copy_settlement_module();
 
-        // 決済モジュールを利用可能リストに追加
+        // 決済モジュールを利用可能リストに追加（重要）
         $this->register_settlement_module();
 
         // 書き換えルールをフラッシュ
         flush_rewrite_rules();
+
+        error_log('GrandPay: Plugin activation completed');
+    }
+
+    /**
+     * 決済モジュールを利用可能リストに登録
+     */
+    private function register_settlement_module() {
+        // 利用可能決済モジュール一覧を取得
+        $available_settlement = get_option('usces_available_settlement', array());
+
+        if (!isset($available_settlement['grandpay'])) {
+            // 他のモジュールと同じ形式で登録
+            $available_settlement['grandpay'] = 'GrandPay';
+            $result = update_option('usces_available_settlement', $available_settlement);
+
+            if ($result) {
+                error_log('GrandPay: Successfully registered in available settlement modules');
+                error_log('GrandPay: Available modules: ' . print_r($available_settlement, true));
+
+                add_action('admin_notices', function () {
+                    echo '<div class="notice notice-success is-dismissible">
+                        <h4>🎉 GrandPay決済モジュール登録完了</h4>
+                        <p>「利用できるクレジット決済モジュール」に<strong>GrandPay</strong>が追加されました。</p>
+                        <p>Welcart Shop → 基本設定 → クレジット決済設定 で設定を続けてください。</p>
+                    </div>';
+                });
+            } else {
+                error_log('GrandPay: Failed to register in available settlement modules');
+            }
+        } else {
+            error_log('GrandPay: Already registered in available settlement modules');
+        }
     }
 
     /**
@@ -238,6 +257,18 @@ class WelcartGrandpayPayment {
             return false;
         }
 
+        // 既存ファイルのチェック（バージョン比較など）
+        if (file_exists($destination_file)) {
+            $source_mtime = filemtime($source_file);
+            $dest_mtime = filemtime($destination_file);
+
+            if ($source_mtime <= $dest_mtime) {
+                // 既存ファイルの方が新しいか同じ場合はスキップ
+                error_log('GrandPay: Settlement module file is up to date');
+                return true;
+            }
+        }
+
         // ファイルコピー実行
         $copy_result = copy($source_file, $destination_file);
 
@@ -246,18 +277,13 @@ class WelcartGrandpayPayment {
 
             add_action('admin_notices', function () use ($destination_file) {
                 echo '<div class="notice notice-success is-dismissible">
-                    <h4>🎉 GrandPay決済モジュールのインストール完了！</h4>
+                    <h4>✅ GrandPay決済モジュールファイル配置完了</h4>
                     <p>ファイル配置先: <code>' . str_replace(ABSPATH, '', $destination_file) . '</code></p>
-                    <h4>📋 次の設定手順:</h4>
-                    <ol>
-                        <li><strong>Welcart Shop → 基本設定 → クレジット決済設定</strong> に移動</li>
-                        <li><strong>左側のリストからGrandPayを右側にドラッグ</strong></li>
-                        <li><strong>「利用するモジュールを更新する」</strong> をクリック</li>
-                        <li><strong>GrandPayタブ</strong> で設定を入力</li>
-                    </ol>
+                    <p>次の手順: Welcart Shop → 基本設定 → クレジット決済設定</p>
                 </div>';
             });
 
+            error_log('GrandPay: Settlement module file copied successfully');
             return true;
         } else {
             add_action('admin_notices', function () use ($source_file, $destination_file) {
@@ -268,6 +294,7 @@ class WelcartGrandpayPayment {
                 </div>';
             });
 
+            error_log('GrandPay: Settlement module file copy failed');
             return false;
         }
     }
@@ -310,11 +337,52 @@ class WelcartGrandpayPayment {
         // 決済モジュールファイルを削除（オプション）
         $this->remove_settlement_module();
 
+        // 利用可能モジュールリストから削除
+        $this->unregister_settlement_module();
+
         // 一時的なデータを削除
         delete_transient('welcart_grandpay_access_token');
         delete_transient('welcart_grandpay_token_expires_at');
 
         flush_rewrite_rules();
+
+        error_log('GrandPay: Plugin deactivation completed');
+    }
+
+    /**
+     * 決済モジュールを利用可能リストから削除
+     */
+    private function unregister_settlement_module() {
+        $available_settlement = get_option('usces_available_settlement', array());
+
+        if (isset($available_settlement['grandpay'])) {
+            unset($available_settlement['grandpay']);
+            $result = update_option('usces_available_settlement', $available_settlement);
+
+            if ($result) {
+                error_log('GrandPay: Successfully removed from available settlement modules');
+            } else {
+                error_log('GrandPay: Failed to remove from available settlement modules');
+            }
+        }
+
+        // 利用中モジュールリストからも削除
+        $selected_settlement = get_option('usces_settlement_selected', array());
+
+        if (is_array($selected_settlement)) {
+            $key = array_search('grandpay', $selected_settlement);
+            if ($key !== false) {
+                unset($selected_settlement[$key]);
+                update_option('usces_settlement_selected', array_values($selected_settlement));
+                error_log('GrandPay: Removed from selected settlement modules');
+            }
+        } elseif (is_string($selected_settlement)) {
+            $selected_settlement = str_replace('grandpay,', '', $selected_settlement);
+            $selected_settlement = str_replace(',grandpay', '', $selected_settlement);
+            $selected_settlement = str_replace('grandpay', '', $selected_settlement);
+            update_option('usces_settlement_selected', $selected_settlement);
+            error_log('GrandPay: Removed from selected settlement modules (string format)');
+        }
     }
 
     /**
@@ -374,6 +442,29 @@ class WelcartGrandpayPayment {
     public static function is_test_mode() {
         return self::get_setting('test_mode') === 'on';
     }
+
+    /**
+     * 決済モジュールが正しく登録されているかチェック
+     */
+    public static function is_module_registered() {
+        $available_settlement = get_option('usces_available_settlement', array());
+        return isset($available_settlement['grandpay']);
+    }
+
+    /**
+     * 決済モジュールが選択されているかチェック
+     */
+    public static function is_module_selected() {
+        $selected_settlement = get_option('usces_settlement_selected', array());
+
+        if (is_array($selected_settlement)) {
+            return in_array('grandpay', $selected_settlement);
+        } elseif (is_string($selected_settlement)) {
+            return strpos($selected_settlement, 'grandpay') !== false;
+        }
+
+        return false;
+    }
 }
 
 // プラグインの初期化
@@ -389,5 +480,17 @@ if (!function_exists('welcart_grandpay_log')) {
 if (!function_exists('welcart_grandpay_is_enabled')) {
     function welcart_grandpay_is_enabled() {
         return WelcartGrandpayPayment::is_enabled();
+    }
+}
+
+if (!function_exists('welcart_grandpay_is_module_registered')) {
+    function welcart_grandpay_is_module_registered() {
+        return WelcartGrandpayPayment::is_module_registered();
+    }
+}
+
+if (!function_exists('welcart_grandpay_is_module_selected')) {
+    function welcart_grandpay_is_module_selected() {
+        return WelcartGrandpayPayment::is_module_selected();
     }
 }

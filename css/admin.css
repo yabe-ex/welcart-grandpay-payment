@@ -1,0 +1,210 @@
+/* GrandPay 管理画面スタイル */
+
+/* 決済設定ページ */
+.settle_table.test-mode {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 2px solid #ffc107;
+}
+
+.settle_table.test-mode th {
+    background-color: #fff3cd;
+}
+
+/* GrandPay専用の説明文スタイル */
+.settle_exp {
+    margin: 20px 0;
+    padding: 20px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+}
+
+.settle_exp h4 {
+    color: #0073aa;
+    margin-top: 0;
+}
+
+.settle_exp ul,
+.settle_exp ol {
+    margin-left: 20px;
+}
+
+/*
+利用可能モジュールリストとタブのGrandPay用カスタムスタイルを削除
+他の決済モジュールと同じデザインを使用
+*/
+.grandpay-debug-page .card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+    margin: 20px 0;
+    padding: 20px;
+    border-radius: 6px;
+}
+
+.grandpay-debug-page .card h2 {
+    margin-top: 0;
+    color: #23282d;
+}
+
+.grandpay-debug-page .form-table th {
+    width: 200px;
+    font-weight: 600;
+}
+
+/* 成功・エラー状態の表示 */
+.grandpay-status-success {
+    color: #46b450;
+    font-weight: 600;
+}
+
+.grandpay-status-error {
+    color: #dc3232;
+    font-weight: 600;
+}
+
+.grandpay-status-warning {
+    color: #ffb900;
+    font-weight: 600;
+}
+
+/* 設定フォームの改善 */
+.settle_table input[type='text']:disabled,
+.settle_table input[type='password']:disabled,
+.settle_table textarea:disabled {
+    background-color: #f1f1f1;
+    color: #999;
+}
+
+.settle_table tr.explanation {
+    border-top: none;
+}
+
+.settle_table tr.explanation td {
+    padding-top: 5px;
+    padding-bottom: 15px;
+    font-style: italic;
+    font-size: 13px;
+    color: #666;
+    background-color: #f8f9fa;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .settle_table {
+        font-size: 14px;
+    }
+
+    .settle_table th {
+        width: auto;
+        display: block;
+        text-align: left;
+        padding: 8px;
+    }
+
+    .settle_table td {
+        display: block;
+        padding: 8px;
+        border-top: none;
+    }
+}
+
+/* フォーカス状態の改善 */
+.settle_table input:focus,
+.settle_table textarea:focus {
+    border-color: #007cba;
+    box-shadow: 0 0 0 1px #007cba;
+    outline: none;
+}
+
+/* ボタンスタイルの統一 */
+.grandpay-button-primary {
+    background: #007cba;
+    border-color: #005a87;
+    color: #fff;
+    text-shadow: 0 -1px 1px #005a87, 1px 0 1px #005a87, 0 1px 1px #005a87, -1px 0 1px #005a87;
+}
+
+.grandpay-button-primary:hover {
+    background: #005a87;
+    border-color: #005a87;
+    color: #fff;
+}
+
+/* 通知メッセージの改善 */
+.notice.grandpay-notice {
+    border-left-width: 4px;
+    padding: 12px;
+}
+
+.notice.grandpay-notice h4 {
+    margin: 0 0 8px 0;
+}
+
+.notice.grandpay-notice ol,
+.notice.grandpay-notice ul {
+    margin: 8px 0 8px 20px;
+}
+
+/* アニメーション効果 */
+.grandpay-fade-in {
+    animation: grandpayFadeIn 0.3s ease-out;
+}
+
+@keyframes grandpayFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ローディング状態 */
+.grandpay-loading {
+    position: relative;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.grandpay-loading:after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007cba;
+    border-radius: 50%;
+    animation: grandpaySpin 1s linear infinite;
+}
+
+@keyframes grandpaySpin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* タブ関連のスタイル（控えめに調整） */
+#uscestabs .ui-tabs-nav li.grandpay-tab {
+    /* 標準タブと同じデザインを使用 */
+}
+
+#uscestabs .ui-tabs-nav li.grandpay-tab.ui-tabs-active {
+    /* 標準アクティブタブと同じデザインを使用 */
+}
+
+#uscestabs .ui-tabs-nav li.grandpay-tab a {
+    /* 標準タブリンクと同じデザインを使用 */
+}
+
+#uscestabs .ui-tabs-nav li.grandpay-tab.ui-tabs-active a {
+    /* 標準アクティブタブリンクと同じデザインを使用 */
+}

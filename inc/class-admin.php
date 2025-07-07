@@ -6,9 +6,6 @@ class WelcartGrandpayPaymentAdmin {
         // 強制ログ（WP_DEBUG関係なく出力）
         error_log('GrandPay Admin: Constructor called - FORCED LOG');
 
-        // Welcart が読み込まれた後にフィルターを登録
-        add_action('init', array($this, 'register_settlement_filters'), 15);
-
         add_action('admin_enqueue_scripts', array($this, 'admin_enqueue'));
 
         // プラグイン独自の設定ページ（デバッグ用）
@@ -20,102 +17,53 @@ class WelcartGrandpayPaymentAdmin {
         // インストール案内の表示
         add_action('admin_notices', array($this, 'show_installation_guide'));
 
-        // **フィルターフックの強制テスト**
-        add_action('admin_init', array($this, 'test_filter_hooks'));
-
-        // デバッグ：すべてのフィルターフックをログ出力
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            add_action('init', array($this, 'debug_all_hooks'), 99);
-        }
+        // **決済モジュール管理（Welcartの標準仕組みに準拠）**
+        add_action('admin_init', array($this, 'ensure_settlement_module_registration'), 20);
 
         error_log('GrandPay Admin: Constructor completed - FORCED LOG');
     }
 
     /**
-     * Welcart の決済関連フィルターを登録
+     * 決済モジュールが正しく登録されているかを確認・修正
      */
-    public function register_settlement_filters() {
-        // Welcart が利用可能かチェック
+    public function ensure_settlement_module_registration() {
+        // Welcartが利用可能かチェック
         if (!function_exists('usces_get_system_option')) {
-            error_log('GrandPay Admin: Welcart not available, skipping filter registration');
+            error_log('GrandPay Admin: Welcart not available for settlement module registration');
             return;
         }
 
-        error_log('GrandPay Admin: Registering settlement filters');
-
-        // 複数のフィルター名でタブ追加を試行（Welcart バージョンによる違いに対応）
-        add_filter('usces_filter_settlement_tab_title', array($this, 'add_settlement_tab'), 10, 1);
-        add_filter('usces_filter_settlement_tab_body', array($this, 'add_settlement_tab_body'), 10, 1);
-        add_filter('usces_settlement_tab_title', array($this, 'add_settlement_tab'), 10, 1);
-        add_filter('usces_settlement_tab_body', array($this, 'add_settlement_tab_body'), 10, 1);
-        add_filter('usces_filter_settlement_tabs', array($this, 'add_settlement_tab'), 10, 1);
-        add_filter('usces_settlement_tabs', array($this, 'add_settlement_tab'), 10, 1);
-
-        // 設定保存処理
-        add_action('usces_action_admin_settlement_update', array($this, 'save_settlement_settings'));
-        add_action('usces_admin_settlement_update', array($this, 'save_settlement_settings'));
-
-        error_log('GrandPay Admin: Settlement filters registered');
-    }
-
-    /**
-     * フィルターフックの強制テスト
-     */
-    public function test_filter_hooks() {
-        // 現在のページがWelcartの設定ページかチェック
-        if (!isset($_GET['page']) || $_GET['page'] !== 'usces_settlement') {
+        // 決済モジュールファイルの存在確認
+        $settlement_file = WP_PLUGIN_DIR . '/usc-e-shop/settlement/grandpay.php';
+        if (!file_exists($settlement_file)) {
+            error_log('GrandPay Admin: Settlement module file not found: ' . $settlement_file);
             return;
         }
 
-        error_log('GrandPay Admin: test_filter_hooks() called on settlement page');
+        // 利用可能決済モジュール一覧を取得
+        $available_settlement = get_option('usces_available_settlement', array());
 
-        // フィルターフックの手動実行テスト
-        $test_tabs = array('existing_tab' => 'Existing Tab');
-
-        // フィルターを手動で実行
-        $result_tabs = apply_filters('usces_filter_settlement_tab_title', $test_tabs);
-        error_log('GrandPay Admin: Manual filter test result - ' . print_r($result_tabs, true));
-
-        // 直接メソッドを呼び出してテスト
-        $direct_result = $this->add_settlement_tab($test_tabs);
-        error_log('GrandPay Admin: Direct method call result - ' . print_r($direct_result, true));
-
-        // グローバルフィルター一覧を確認
-        global $wp_filter;
-        if (isset($wp_filter['usces_filter_settlement_tab_title'])) {
-            $callback_count = count($wp_filter['usces_filter_settlement_tab_title']->callbacks);
-            error_log("GrandPay Admin: usces_filter_settlement_tab_title filter exists with $callback_count callbacks");
-
-            // 登録されているコールバックを確認
-            foreach ($wp_filter['usces_filter_settlement_tab_title']->callbacks as $priority => $callbacks) {
-                foreach ($callbacks as $callback_id => $callback_data) {
-                    error_log("GrandPay Admin: Callback found - Priority: $priority, ID: $callback_id");
-                }
-            }
-        } else {
-            error_log('GrandPay Admin: usces_filter_settlement_tab_title filter does NOT exist');
+        // GrandPayが登録されていない場合は追加
+        if (!isset($available_settlement['grandpay'])) {
+            $available_settlement['grandpay'] = 'GrandPay';
+            update_option('usces_available_settlement', $available_settlement);
+            error_log('GrandPay Admin: Added to available settlement modules');
         }
-    }
 
-    public function debug_all_hooks() {
-        global $wp_filter;
+        // 決済モジュール情報を確認
+        if (file_exists($settlement_file)) {
+            require_once($settlement_file);
 
-        // Welcart関連のフィルター・アクション名をすべて記録
-        $welcart_hooks = array();
-        foreach ($wp_filter as $hook_name => $hook_data) {
-            if (strpos($hook_name, 'usces') !== false) {
-                $welcart_hooks[] = $hook_name;
+            // モジュール情報取得関数の存在確認
+            if (function_exists('usces_get_settlement_info_grandpay')) {
+                $info = usces_get_settlement_info_grandpay();
+                error_log('GrandPay Admin: Settlement module info: ' . print_r($info, true));
+            } else {
+                error_log('GrandPay Admin: usces_get_settlement_info_grandpay function not found in module file');
             }
         }
 
-        if (!empty($welcart_hooks)) {
-            error_log('GrandPay Debug: Available Welcart hooks: ' . implode(', ', $welcart_hooks));
-        }
-
-        // 現在のページ確認
-        if (isset($_GET['page']) && strpos($_GET['page'], 'usces_settlement') !== false) {
-            error_log('GrandPay Debug: On Welcart settlement page: ' . $_GET['page']);
-        }
+        error_log('GrandPay Admin: Settlement module registration check completed');
     }
 
     public function show_installation_guide() {
@@ -138,207 +86,61 @@ class WelcartGrandpayPaymentAdmin {
                         ↓ コピー ↓<br>
                         <code><?php echo WP_PLUGIN_DIR; ?>/usc-e-shop/settlement/grandpay.php</code>
                     </li>
-                    <li><strong>支払方法を追加</strong><br>
-                        Welcart Shop → 基本設定 → 支払方法 → 新規追加<br>
-                        • 支払方法名：クレジットカード決済<br>
-                        • 決済種別：クレジット<br>
-                        • 決済モジュール：<code>grandpay.php</code>
+                    <li><strong>利用できるモジュールリストに追加</strong><br>
+                        このページの「利用できるクレジット決済モジュール」に「GrandPay」が表示されるので、
+                        「利用中のクレジット決済モジュール」にドラッグ&ドロップで移動
                     </li>
-                    <li><strong>このページでGrandPay設定を行う</strong></li>
+                    <li><strong>「利用するモジュールを更新する」をクリック</strong></li>
+                    <li><strong>「GrandPay」タブで詳細設定を行う</strong></li>
                 </ol>
             </div>
-        <?php
+            <?php
         } else {
-        ?>
-            <div class="notice notice-success">
-                <p><strong>✅ GrandPay決済モジュールが正常に配置されています。</strong><br>
-                    支払方法の追加がまだの場合は、Welcart Shop → 基本設定 → 支払方法で設定してください。</p>
-            </div>
+            // 利用可能モジュールリストに登録されているかチェック
+            $available_settlement = get_option('usces_available_settlement', array());
+
+            if (!isset($available_settlement['grandpay'])) {
+            ?>
+                <div class="notice notice-info">
+                    <h4>🔄 GrandPay決済モジュール 自動登録中</h4>
+                    <p>決済モジュールファイルは配置済みです。利用可能モジュールリストに自動登録しています...</p>
+                    <p>ページをリロードしてください。</p>
+                </div>
+                <?php
+            } else {
+                // 利用中モジュールリストに含まれているかチェック
+                $selected_settlement = get_option('usces_settlement_selected', array());
+                $is_selected = false;
+
+                if (is_array($selected_settlement)) {
+                    $is_selected = in_array('grandpay', $selected_settlement);
+                } elseif (is_string($selected_settlement)) {
+                    $is_selected = strpos($selected_settlement, 'grandpay') !== false;
+                }
+
+                if (!$is_selected) {
+                ?>
+                    <div class="notice notice-info">
+                        <h4>✅ GrandPay決済モジュール設定可能</h4>
+                        <p><strong>手順:</strong></p>
+                        <ol>
+                            <li>下記の「利用できるクレジット決済モジュール」から「<strong>GrandPay</strong>」を見つける</li>
+                            <li>「<strong>GrandPay</strong>」を「利用中のクレジット決済モジュール」エリアにドラッグ&ドロップ</li>
+                            <li>「<strong>利用するモジュールを更新する</strong>」ボタンをクリック</li>
+                            <li>「<strong>GrandPay</strong>」タブが表示されるので、そこで詳細設定</li>
+                        </ol>
+                    </div>
+                <?php
+                } else {
+                ?>
+                    <div class="notice notice-success">
+                        <h4>🎉 GrandPay決済モジュール利用準備完了</h4>
+                        <p>「<strong>GrandPay</strong>」タブで詳細設定を行ってください。</p>
+                    </div>
         <?php
-        }
-    }
-
-    /**
-     * Welcartのクレジット決済設定タブにGrandPayを追加
-     */
-    public function add_settlement_tab($tabs) {
-        // どのフィルターから呼ばれたかを確認
-        $backtrace = debug_backtrace();
-        $filter_name = 'unknown';
-        foreach ($backtrace as $trace) {
-            if (isset($trace['function']) && $trace['function'] === 'apply_filters') {
-                $filter_name = isset($trace['args'][0]) ? $trace['args'][0] : 'unknown';
-                break;
+                }
             }
         }
-
-        // デバッグログ - 配列を文字列変換の警告を修正
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log("GrandPay: add_settlement_tab called via filter: " . (is_array($filter_name) ? 'Array' : $filter_name));
-            error_log('GrandPay: existing tabs - ' . print_r($tabs, true));
-        }
-
-        $tabs['grandpay'] = 'GrandPay';
-
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('GrandPay: tabs after adding grandpay - ' . print_r($tabs, true));
-        }
-
-        return $tabs;
-    }
-
-    /**
-     * GrandPay設定タブの内容
-     */
-    public function add_settlement_tab_body($settlement_selected) {
-        if ($settlement_selected !== 'grandpay') {
-            return;
-        }
-
-        $options = get_option('usces_ex');
-        $grandpay_settings = $options['grandpay'] ?? array();
-
-        ?>
-        <table class="settle_table">
-            <tr>
-                <th>GrandPay を利用する</th>
-                <td colspan="2">
-                    <label>
-                        <input name="grandpay[activate]" type="radio" id="grandpay_activate_1" value="on" <?php checked($grandpay_settings['activate'] ?? '', 'on'); ?> />
-                        利用する
-                    </label>
-                    <br />
-                    <label>
-                        <input name="grandpay[activate]" type="radio" id="grandpay_activate_2" value="off" <?php checked($grandpay_settings['activate'] ?? '', 'off'); ?> />
-                        利用しない
-                    </label>
-                </td>
-            </tr>
-            <tr>
-                <th>Tenant Key</th>
-                <td>
-                    <input name="grandpay[tenant_key]" type="text" id="grandpay_tenant_key" value="<?php echo esc_attr($grandpay_settings['tenant_key'] ?? ''); ?>" size="50" />
-                </td>
-                <td>GrandPayから提供されたTenant Keyを入力してください</td>
-            </tr>
-            <tr>
-                <th>Client ID</th>
-                <td>
-                    <input name="grandpay[client_id]" type="text" id="grandpay_client_id" value="<?php echo esc_attr($grandpay_settings['client_id'] ?? ''); ?>" size="50" />
-                </td>
-                <td>OAuth2認証用のClient IDを入力してください</td>
-            </tr>
-            <tr>
-                <th>Client Secret</th>
-                <td>
-                    <input name="grandpay[client_secret]" type="password" id="grandpay_client_secret" value="<?php echo esc_attr($grandpay_settings['client_secret'] ?? ''); ?>" size="50" />
-                </td>
-                <td>OAuth2認証用のClient Secretを入力してください</td>
-            </tr>
-            <tr>
-                <th>Webhook Secret</th>
-                <td>
-                    <input name="grandpay[webhook_secret]" type="password" id="grandpay_webhook_secret" value="<?php echo esc_attr($grandpay_settings['webhook_secret'] ?? ''); ?>" size="50" />
-                </td>
-                <td>Webhook署名検証用のSecretを入力してください</td>
-            </tr>
-            <tr>
-                <th>テストモード</th>
-                <td colspan="2">
-                    <label>
-                        <input name="grandpay[test_mode]" type="radio" id="grandpay_test_mode_1" value="on" <?php checked($grandpay_settings['test_mode'] ?? '', 'on'); ?> />
-                        テストモード
-                    </label>
-                    <br />
-                    <label>
-                        <input name="grandpay[test_mode]" type="radio" id="grandpay_test_mode_2" value="off" <?php checked($grandpay_settings['test_mode'] ?? '', 'off'); ?> />
-                        本番モード
-                    </label>
-                </td>
-            </tr>
-            <tr>
-                <th>決済方法名</th>
-                <td>
-                    <input name="grandpay[payment_name]" type="text" id="grandpay_payment_name" value="<?php echo esc_attr($grandpay_settings['payment_name'] ?? 'クレジットカード決済'); ?>" size="30" />
-                </td>
-                <td>フロント画面に表示される決済方法名</td>
-            </tr>
-            <tr>
-                <th>決済説明文</th>
-                <td>
-                    <textarea name="grandpay[payment_description]" id="grandpay_payment_description" rows="3" cols="50"><?php echo esc_textarea($grandpay_settings['payment_description'] ?? 'クレジットカードで安全にお支払いいただけます。'); ?></textarea>
-                </td>
-                <td>フロント画面に表示される説明文</td>
-            </tr>
-            <tr>
-                <th>Webhook URL</th>
-                <td colspan="2">
-                    <code><?php echo admin_url('admin-ajax.php?action=grandpay_webhook'); ?></code>
-                    <p class="description">この URLを GrandPay の管理画面で Webhook URL として設定してください。</p>
-                </td>
-            </tr>
-        </table>
-
-        <script type="text/javascript">
-            jQuery(document).ready(function($) {
-                // テスト接続ボタンの処理（今後実装予定）
-                $('#grandpay_test_connection').click(function() {
-                    // Ajax でテスト接続を実行
-                });
-            });
-        </script>
-
-        <style>
-            .settle_table th {
-                background-color: #f9f9f9;
-                padding: 10px;
-                border: 1px solid #ddd;
-                width: 180px;
-            }
-
-            .settle_table td {
-                padding: 10px;
-                border: 1px solid #ddd;
-            }
-        </style>
-    <?php
-    }
-
-    /**
-     * GrandPay設定の保存
-     */
-    public function save_settlement_settings() {
-        if (!isset($_POST['grandpay'])) {
-            return;
-        }
-
-        $grandpay_settings = $_POST['grandpay'];
-
-        // バリデーション
-        $grandpay_settings['tenant_key'] = sanitize_text_field($grandpay_settings['tenant_key'] ?? '');
-        $grandpay_settings['client_id'] = sanitize_text_field($grandpay_settings['client_id'] ?? '');
-        $grandpay_settings['client_secret'] = sanitize_text_field($grandpay_settings['client_secret'] ?? '');
-        $grandpay_settings['webhook_secret'] = sanitize_text_field($grandpay_settings['webhook_secret'] ?? '');
-        $grandpay_settings['activate'] = in_array($grandpay_settings['activate'] ?? '', array('on', 'off')) ? $grandpay_settings['activate'] : 'off';
-        $grandpay_settings['test_mode'] = in_array($grandpay_settings['test_mode'] ?? '', array('on', 'off')) ? $grandpay_settings['test_mode'] : 'off';
-        $grandpay_settings['payment_name'] = sanitize_text_field($grandpay_settings['payment_name'] ?? 'クレジットカード決済');
-        $grandpay_settings['payment_description'] = sanitize_textarea_field($grandpay_settings['payment_description'] ?? '');
-
-        // Welcartの設定に保存
-        $options = get_option('usces_ex', array());
-        $options['grandpay'] = $grandpay_settings;
-        update_option('usces_ex', $options);
-
-        // 個別オプションとしても保存（API クラスで使用）
-        update_option('welcart_grandpay_tenant_key', $grandpay_settings['tenant_key']);
-        update_option('welcart_grandpay_client_id', $grandpay_settings['client_id']);
-        update_option('welcart_grandpay_client_secret', $grandpay_settings['client_secret']);
-        update_option('welcart_grandpay_webhook_secret', $grandpay_settings['webhook_secret']);
-        update_option('welcart_grandpay_test_mode', $grandpay_settings['test_mode'] === 'on');
-
-        // アクセストークンキャッシュをクリア
-        delete_transient('welcart_grandpay_access_token');
-        delete_transient('welcart_grandpay_token_expires_at');
     }
 
     /**
@@ -431,7 +233,19 @@ class WelcartGrandpayPaymentAdmin {
         $settlement_file = WP_PLUGIN_DIR . '/usc-e-shop/settlement/grandpay.php';
         $settlement_file_exists = file_exists($settlement_file);
 
-    ?>
+        // 決済モジュール登録状況確認
+        $available_settlement = get_option('usces_available_settlement', array());
+        $is_available = isset($available_settlement['grandpay']);
+
+        $selected_settlement = get_option('usces_settlement_selected', array());
+        $is_selected = false;
+        if (is_array($selected_settlement)) {
+            $is_selected = in_array('grandpay', $selected_settlement);
+        } elseif (is_string($selected_settlement)) {
+            $is_selected = strpos($selected_settlement, 'grandpay') !== false;
+        }
+
+        ?>
         <div class="wrap">
             <h1><?php echo WELCART_GRANDPAY_PAYMENT_NAME; ?> - デバッグ設定</h1>
 
@@ -481,7 +295,53 @@ class WelcartGrandpayPaymentAdmin {
             </div>
 
             <div class="card">
-                <h2>設定状況</h2>
+                <h2>📦 決済モジュール登録状況</h2>
+                <table class="form-table">
+                    <tr>
+                        <th>利用可能モジュールリスト</th>
+                        <td>
+                            <?php echo $is_available ? '✓ 登録済み' : '✗ 未登録'; ?>
+                            <?php if ($is_available): ?>
+                                <br><small>値: <?php echo esc_html($available_settlement['grandpay']); ?></small>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>利用中モジュールリスト</th>
+                        <td>
+                            <?php echo $is_selected ? '✓ 選択済み' : '✗ 未選択'; ?>
+                            <?php if ($is_selected): ?>
+                                <br><small>GrandPayタブが表示されます</small>
+                            <?php else: ?>
+                                <br><small>決済設定ページでドラッグ&ドロップして追加してください</small>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>モジュール情報関数</th>
+                        <td>
+                            <?php
+                            if ($settlement_file_exists) {
+                                require_once($settlement_file);
+                                if (function_exists('usces_get_settlement_info_grandpay')) {
+                                    echo '✓ 正常';
+                                    $info = usces_get_settlement_info_grandpay();
+                                    echo '<br><small>名前: ' . esc_html($info['name'] ?? 'N/A') . '</small>';
+                                    echo '<br><small>バージョン: ' . esc_html($info['version'] ?? 'N/A') . '</small>';
+                                } else {
+                                    echo '✗ 関数が見つかりません';
+                                }
+                            } else {
+                                echo '✗ ファイルが存在しません';
+                            }
+                            ?>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>⚙️ GrandPay設定状況</h2>
                 <table class="form-table">
                     <tr>
                         <th>有効状態</th>
@@ -511,7 +371,7 @@ class WelcartGrandpayPaymentAdmin {
             </div>
 
             <div class="card">
-                <h2>テスト機能</h2>
+                <h2>🧪 テスト機能</h2>
                 <form method="post" style="display: inline-block; margin-right: 10px;">
                     <?php wp_nonce_field('grandpay_test_log'); ?>
                     <p>
@@ -530,16 +390,20 @@ class WelcartGrandpayPaymentAdmin {
             </div>
 
             <div class="card">
-                <h2>設定方法</h2>
-                <ol>
-                    <li>Welcart Shop → <strong>基本設定 → 支払方法</strong> に移動</li>
-                    <li><strong>GrandPay決済</strong>が設定されているか確認</li>
-                    <li>Welcart Shop → <strong>基本設定 → クレジット決済設定</strong> に移動</li>
-                    <li><strong>GrandPay</strong>タブを選択</li>
-                    <li>GrandPayから提供された情報を入力</li>
-                    <li>設定を保存</li>
-                    <li>このページで接続テストを実行</li>
+                <h2>📋 設定手順（正しい順序）</h2>
+                <ol style="line-height: 2;">
+                    <li><strong>決済モジュールファイルの配置</strong> <?php echo $settlement_file_exists ? '✓' : '→ 必要'; ?></li>
+                    <li><strong>利用可能モジュールリストに登録</strong> <?php echo $is_available ? '✓' : '→ 必要'; ?></li>
+                    <li><strong>Welcart決済設定ページでドラッグ&ドロップ</strong> <?php echo $is_selected ? '✓' : '→ 必要'; ?></li>
+                    <li><strong>GrandPayタブで詳細設定</strong> <?php echo !empty($grandpay_settings['tenant_key']) ? '✓' : '→ 必要'; ?></li>
                 </ol>
+
+                <p><strong>設定ページへのリンク:</strong></p>
+                <p>
+                    <a href="<?php echo admin_url('admin.php?page=usces_settlement'); ?>" class="button button-primary">
+                        Welcart クレジット決済設定ページ
+                    </a>
+                </p>
             </div>
         </div>
 
