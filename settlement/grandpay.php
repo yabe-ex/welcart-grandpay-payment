@@ -83,6 +83,8 @@ class GRANDPAY_SETTLEMENT {
             $options['acting_settings']['grandpay']['payment_description'] = 'クレジットカードで安全にお支払いいただけます。';
             $options['acting_settings']['grandpay']['tenant_key']          = '';
             $options['acting_settings']['grandpay']['client_id']           = '';
+            $options['acting_settings']['grandpay']['username']            = '';
+            $options['acting_settings']['grandpay']['credentials']         = '';
             $options['acting_settings']['grandpay']['card_activate']       = 'off';
             update_option('usces', $options);
         }
@@ -168,6 +170,8 @@ class GRANDPAY_SETTLEMENT {
         $options['acting_settings']['grandpay']['payment_description'] = (isset($_POST['payment_description'])) ? sanitize_textarea_field($_POST['payment_description']) : 'クレジットカードで安全にお支払いいただけます。';
         $options['acting_settings']['grandpay']['tenant_key']          = (isset($_POST['tenant_key'])) ? sanitize_text_field($_POST['tenant_key']) : '';
         $options['acting_settings']['grandpay']['client_id']           = (isset($_POST['client_id'])) ? sanitize_text_field($_POST['client_id']) : '';
+        $options['acting_settings']['grandpay']['username']            = (isset($_POST['username'])) ? sanitize_text_field($_POST['username']) : '';
+        $options['acting_settings']['grandpay']['credentials']         = (isset($_POST['credentials'])) ? sanitize_text_field($_POST['credentials']) : '';
         $options['acting_settings']['grandpay']['card_activate']       = (isset($_POST['activate']) && $_POST['activate'] == 'on') ? 'on' : 'off';
 
         // バリデーション
@@ -177,6 +181,12 @@ class GRANDPAY_SETTLEMENT {
             }
             if (WCUtils::is_blank($_POST['client_id'])) {
                 $this->error_mes .= '※Client IDを入力してください<br />';
+            }
+            if (WCUtils::is_blank($_POST['username'])) {
+                $this->error_mes .= '※Usernameを入力してください<br />';
+            }
+            if (WCUtils::is_blank($_POST['credentials'])) {
+                $this->error_mes .= '※Credentialsを入力してください<br />';
             }
         }
 
@@ -260,6 +270,8 @@ class GRANDPAY_SETTLEMENT {
         // 個別オプションとしても保存（API クラスで使用）
         update_option('welcart_grandpay_tenant_key', $options['acting_settings']['grandpay']['tenant_key']);
         update_option('welcart_grandpay_client_id', $options['acting_settings']['grandpay']['client_id']);
+        update_option('welcart_grandpay_username', $options['acting_settings']['grandpay']['username']);
+        update_option('welcart_grandpay_credentials', $options['acting_settings']['grandpay']['credentials']);
         update_option('welcart_grandpay_test_mode', $options['acting_settings']['grandpay']['test_mode'] === 'on');
 
         // usces_exオプションも更新（他のクラスからアクセスしやすくするため）
@@ -347,21 +359,37 @@ class GRANDPAY_SETTLEMENT {
 
                         <tr>
                             <th><a class="explanation-label" id="label_ex_tenant_key_grandpay">Tenant Key</a></th>
-                            <td><input name="tenant_key" type="text" id="tenant_key_grandpay" value="<?php echo esc_attr(isset($acting_opts['tenant_key']) ? $acting_opts['tenant_key'] : ''); ?>" class="regular-text" placeholder="lk_f231a04b647e99bc212375004b3396" /></td>
+                            <td><input name="tenant_key" type="text" id="tenant_key_grandpay" value="<?php echo esc_attr(isset($acting_opts['tenant_key']) ? $acting_opts['tenant_key'] : ''); ?>" class="regular-text" placeholder="tk_f231a0556470a99c22112755043b33f6" /></td>
                         </tr>
                         <tr id="ex_tenant_key_grandpay" class="explanation">
-                            <td colspan="2">GrandPayから提供されたTenant Keyを入力してください。<br>
-                                <strong>テスト用:</strong> lk_f231a04b647e99bc212375004b3396
-                            </td>
+                            <td colspan="2">GrandPayから提供されたTenant Keyを入力してください。</td>
                         </tr>
 
                         <tr>
                             <th><a class="explanation-label" id="label_ex_client_id_grandpay">Client ID</a></th>
-                            <td><input name="client_id" type="text" id="client_id_grandpay" value="<?php echo esc_attr(isset($acting_opts['client_id']) ? $acting_opts['client_id'] : ''); ?>" class="regular-text" placeholder="Y4RxUIltceMsYbHnHlYJ16dwm" /></td>
+                            <td><input name="client_id" type="text" id="client_id_grandpay" value="<?php echo esc_attr(isset($acting_opts['client_id']) ? $acting_opts['client_id'] : ''); ?>" class="regular-text" placeholder="YXBpLW1lcmNoYW50OnNlY3JldA==" /></td>
                         </tr>
                         <tr id="ex_client_id_grandpay" class="explanation">
-                            <td colspan="2">GrandPayから提供されたOAuth2 Client IDを入力してください。<br>
-                                <strong>テスト用:</strong> Y4RxUIltceMsYbHnHlYJ16dwm
+                            <td colspan="2">GrandPayから提供されたClient IDを入力してください。</td>
+                        </tr>
+
+                        <tr>
+                            <th><a class="explanation-label" id="label_ex_username_grandpay">Username</a></th>
+                            <td><input name="username" type="text" id="username_grandpay" value="<?php echo esc_attr(isset($acting_opts['username']) ? $acting_opts['username'] : ''); ?>" class="regular-text" placeholder="your_username" /></td>
+                        </tr>
+                        <tr id="ex_username_grandpay" class="explanation">
+                            <td colspan="2">GrandPay管理画面にログインする際のユーザー名を入力してください。<br>
+                                <strong>※OAuth2認証に使用されます</strong>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <th><a class="explanation-label" id="label_ex_credentials_grandpay">Credentials</a></th>
+                            <td><input name="credentials" type="password" id="credentials_grandpay" value="<?php echo esc_attr(isset($acting_opts['credentials']) ? $acting_opts['credentials'] : ''); ?>" class="regular-text" placeholder="your_password" /></td>
+                        </tr>
+                        <tr id="ex_credentials_grandpay" class="explanation">
+                            <td colspan="2">GrandPay管理画面にログインする際のパスワードを入力してください。<br>
+                                <strong>※OAuth2認証に使用されます</strong>
                             </td>
                         </tr>
 
@@ -387,18 +415,23 @@ class GRANDPAY_SETTLEMENT {
                     <a href="<?php echo esc_url($this->acting_company_url); ?>" target="_blank"><?php echo esc_html($this->acting_name); ?>の詳細はこちら »</a>
                     <p>　</p>
 
-                    <p><strong>🧪 開発・テスト用設定値</strong></p>
-                    <p>実際のGrandPayサービスが利用できない場合は、以下のテスト用設定値をご利用ください：</p>
-                    <ul>
-                        <li><strong>Tenant Key:</strong> lk_f231a04b647e99bc212375004b3396</li>
-                        <li><strong>Client ID:</strong> Y4RxUIltceMsYbHnHlYJ16dwm</li>
-                    </ul>
+                    <!-- Webhook URL設定説明 -->
+                    <div style="background: #e7f3ff; border: 1px solid #0073aa; border-radius: 4px; padding: 15px; margin: 20px 0;">
+                        <h3 style="margin-top: 0; color: #0073aa;">📡 Webhook URL設定</h3>
+                        <p><strong>GrandPayの技術サポートに以下のWebhook URLを設定依頼してください：</strong></p>
+                        <div style="background: #fff; padding: 10px; border-radius: 3px; font-family: monospace; word-break: break-all; margin: 10px 0;">
+                            <code style="font-size: 14px; color: #0073aa;"><?php echo home_url('/wp-json/grandpay/v1/webhook'); ?></code>
+                        </div>
+                        <p><em>※ このURLにより、決済完了/失敗時に自動的に注文ステータスが更新されます</em></p>
+                        <p><strong>設定手順：</strong> GrandPay管理画面 → Webhook URLs → 上記URLを登録</p>
+                    </div>
 
-                    <p><strong>⚠️ 重要な注意事項</strong></p>
+                    <p><strong>🔧 OAuth2認証について</strong></p>
+                    <p>Username/Credentialsは、GrandPay管理画面にログインする際のユーザー名とパスワードです。</p>
                     <ul>
-                        <li><strong>テスト環境でのみ使用</strong>してください</li>
-                        <li>実際の決済処理は行われません</li>
-                        <li>本番運用前に実際のGrandPay契約が必要です</li>
+                        <li><strong>Username:</strong> 管理画面ログイン用ユーザー名</li>
+                        <li><strong>Credentials:</strong> 管理画面ログイン用パスワード</li>
+                        <li>これらの情報でOAuth2アクセストークンを取得します</li>
                     </ul>
 
                     <p><strong>📋 設定後の手順</strong></p>
@@ -406,22 +439,11 @@ class GRANDPAY_SETTLEMENT {
                         <li><strong>上記の設定を保存</strong></li>
                         <li><strong><a href="<?php echo admin_url('admin.php?page=usces_initial#payment_method_setting'); ?>">決済方法設定</a></strong>で「カード決済（GrandPay）」を「Activate」に変更</li>
                         <li><strong><a href="<?php echo admin_url('admin.php?page=usces_initial#acting_setting'); ?>">代行決済設定</a></strong>で「決済種別」を「GrandPay」に変更</li>
+                        <li><strong>Webhook URL</strong>をGrandPay技術サポートに設定依頼</li>
                         <li>フロント画面で決済テストを実施</li>
                     </ol>
 
-                    <p><strong>🔧 実際のGrandPayサービス利用時</strong></p>
-                    <ol>
-                        <li>GrandPayと正式契約を行う</li>
-                        <li>GrandPay管理画面で認証情報を取得</li>
-                        <li>上記テスト値を実際の値に置き換え</li>
-                        <li>動作環境を「本番環境」に切り替え</li>
-                        <li>十分なテストを実施</li>
-                    </ol>
 
-                    <p><strong>🔗 Webhook URL:</strong><br>
-                        <code><?php echo admin_url('admin-ajax.php?action=grandpay_webhook'); ?></code><br>
-                        この URLを GrandPay の管理画面で Webhook URL として設定してください。
-                    </p>
 
                     <p><strong>🧪 デバッグ機能:</strong><br>
                         <a href="<?php echo admin_url('options-general.php?page=welcart-grandpay-payment'); ?>" class="button button-secondary">
